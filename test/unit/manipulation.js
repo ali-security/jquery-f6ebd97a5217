@@ -2659,3 +2659,77 @@ QUnit.test( "Make sure col element is appended correctly", function( assert ) {
 
 	assert.strictEqual( table.find( "td" ).width(), 150 );
 } );
+
+QUnit.test( "Sanitized HTML doesn't get unsanitized (gh-4647)", function( assert ) {
+	var xss,
+		done = assert.async(),
+		container = jQuery( "<div></div>" ).appendTo( "#qunit-fixture" );
+
+	assert.expect( 4 );
+
+	Globals.register( "xss" );
+	xss = window.xss = sinon.spy();
+
+	// Thanks to Masato Kinugawa from Cure53 for providing the test case.
+	// The markup is inert when parsed in the context of a regular element (the <img>
+	// is the text content of the <style> element), but becomes executable when it is
+	// wrapped in <select> for parsing, because <style> is then ignored and
+	// the closing </select> breaks out of the wrapper.
+	function payload( id ) {
+		return "<option><style></option></select><img src=url404 onerror=xss(" +
+			id + ")></style>";
+	}
+
+	jQuery( "<div></div>" ).appendTo( container ).html( payload( 0 ) );
+	jQuery( "<div></div>" ).appendTo( container ).append( payload( 1 ) );
+	jQuery( payload( 2 ) ).appendTo( jQuery( "<div></div>" ).appendTo( container ) );
+	jQuery( jQuery.parseHTML( payload( 3 ) ) )
+		.appendTo( jQuery( "<div></div>" ).appendTo( container ) );
+
+	setTimeout( function() {
+		var i;
+
+		for ( i = 0; i < 4; i++ ) {
+			assert.ok( xss.withArgs( i ).notCalled,
+				"Insecure code wasn't executed, input: " + payload( i ) );
+		}
+		done();
+	}, 1000 );
+} );
+
+QUnit.test( "HTML containing <option> is not parsed inside a <select> wrapper (gh-4647)", function( assert ) {
+	var probe, expected,
+		html = "<option>opt</option></select><b>after</b>",
+		container = jQuery( "<div></div>" ).appendTo( "#qunit-fixture" );
+
+	// Support: IE 9 only
+	// IE 9 drops <option> elements parsed outside of <select>,
+	// so jQuery still has to wrap them there.
+	probe = document.createElement( "div" );
+	probe.innerHTML = "<option></option>";
+	if ( !probe.lastChild ) {
+		assert.expect( 0 );
+		return;
+	}
+
+	assert.expect( 4 );
+
+	// The markup must be parsed exactly as the browser parses it in a regular
+	// element, so a closing </select> in it cannot break out of a wrapper.
+	probe.innerHTML = html;
+	expected = probe.innerHTML;
+
+	assert.deepEqual(
+		jQuery.map( jQuery.parseHTML( html ), function( node ) {
+			return node.nodeName.toLowerCase();
+		} ),
+		[ "option", "b" ],
+		"jQuery.parseHTML parses <option> markup in the context of a regular element"
+	);
+
+	assert.equal( container.html( html ).html(), expected, ".html() matches native parsing" );
+	assert.equal( container.empty().append( html ).html(), expected,
+		".append() matches native parsing" );
+	assert.equal( jQuery( "<div></div>" ).append( jQuery( html ) ).html(), expected,
+		"jQuery( html ) matches native parsing" );
+} );
