@@ -1,7 +1,74 @@
 language: node_js
-sudo: false
-node_js:
-- "0.10"
-- "0.12"
-- "4"
-- "5"
+dist: focal
+
+# Registry time machine pinned to the 2.2.3 release date so transitive
+# dependencies resolve as they did in April 2016.
+before_install:
+  - npm config set registry https://:2016-04-05T19%3A27%3A17.929Z@time-machines-npm.sealsecurity.io/
+
+# All legs are declared explicitly under jobs.include: Travis has been observed
+# to collapse a top-level node_js matrix into a single job when jobs.include
+# is present.
+jobs:
+  include:
+    # Node 0.x legs: Gruntfile.js sets runJsdomTests=false when jsdom 5.6.1
+    # cannot be required on Node 0.x, which silently turns test_fast into an
+    # empty task. Installing jsdom@3 is upstream's own remedy (the old_jsdom
+    # task in build/tasks/install_old_jsdom.js), so the node smoke tests run.
+    # jsdom@3 pulls contextify@0.1.15, whose node-gyp 3.x rebuild rejects the
+    # focal image's default Python 3.8; install python2 and point npm at it.
+    - name: "node 0.10"
+      node_js: "0.10"
+      before_script:
+        - sudo apt-get update -qq
+        - sudo apt-get install -y python2
+        - npm config set python /usr/bin/python2
+        - npm install jsdom@3
+      script: npm test
+    - name: "node 0.12"
+      node_js: "0.12"
+      before_script:
+        - sudo apt-get update -qq
+        - sudo apt-get install -y python2
+        - npm config set python /usr/bin/python2
+        - npm install jsdom@3
+      script: npm test
+    - name: "node 4"
+      node_js: "4"
+      script: npm test
+    - name: "node 5"
+      node_js: "5"
+      script: npm test
+
+    # Full QUnit browser suite (test/index.html?dev) in headless Chrome, served
+    # by PHP's built-in server so the test/data/*.php ajax fixtures work.
+    # PHP_CLI_SERVER_WORKERS is load-bearing: a single-process php -S starves
+    # the fixture iframes. error_reporting=0 because test/data/echoQuery.php
+    # reads $_SERVER['QUERY_STRING'] unguarded and a PHP 7 notice would
+    # corrupt the response body.
+    - name: "QUnit browser suite (headless Chrome)"
+      node_js: "5"
+      addons:
+        chrome: stable
+      before_script:
+        - sudo apt-get update -qq
+        - sudo apt-get install -y php-cli
+        - >-
+          PHP_CLI_SERVER_WORKERS=10 php -d error_reporting=0 -d display_errors=0
+          -S 127.0.0.1:8000 -t . >/tmp/php.log 2>&1 &
+        - >-
+          for i in $(seq 1 30); do
+          curl -sf -o /dev/null http://127.0.0.1:8000/test/index.html && break;
+          sleep 1; done
+      script:
+        # Builds dist/jquery.js, which the suite loads via ?dev.
+        - ./node_modules/.bin/grunt
+        - >-
+          bash -c 'source ~/.nvm/nvm.sh && nvm install 18
+          && npm install --no-save --no-package-lock --no-audit --no-fund
+          --registry=https://registry.npmjs.org/
+          --prefix "$HOME/qunit-runner-deps" puppeteer-core@21
+          && NODE_PATH="$HOME/qunit-runner-deps/node_modules"
+          node test/qunit-runner/run.js'
+      after_failure:
+        - tail -n 200 /tmp/php.log
