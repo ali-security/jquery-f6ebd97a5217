@@ -460,7 +460,7 @@ QUnit.test( "allow modification of coordinates argument (gh-1848)", function( as
 	assert.expect( 1 );
 
 	var offsetTop,
-		element = jQuery( "<div/>" ).appendTo( "#qunit-fixture" );
+		element = jQuery( "<div></div>" ).appendTo( "#qunit-fixture" );
 
 	element.offset( function( index, coords ) {
 		coords.top = 100;
